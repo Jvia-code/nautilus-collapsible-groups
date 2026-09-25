@@ -27,13 +27,17 @@ The main use case is large mixed directories such as `Downloads`, where document
 
 ## Screenshots
 
-### List view
+### List view — expanded groups
 
-Screenshot coming soon.
+![List view with expanded groups](screenshots/list-expanded.png)
+
+### List view — collapsed groups
+
+![List view with collapsed groups](screenshots/list-collapsed.png)
 
 ### Grid view
 
-Screenshot coming soon.
+![Grid view with independent collapsible groups](screenshots/grid-groups.png)
 
 ## Grid view implementation
 

@@ -1,0 +1,2283 @@
+--- a/data/org.freedesktop.FileManager1.service.in
++++ b/data/org.freedesktop.FileManager1.service.in
+@@ -1,3 +1,3 @@
+ [D-BUS Service]
+-Name=org.freedesktop.FileManager1
++Name=org.gnome.Nautilus.GroupesTest.FileManager1
+ Exec=@bindir@/nautilus --gapplication-service
+--- a/data/org.gnome.nautilus.gschema.xml
++++ b/data/org.gnome.nautilus.gschema.xml
+@@ -68,7 +68,7 @@
+     <value value="3" nick="encrypted_zip"/>
+   </enum>
+ 
+-  <schema path="/org/gnome/nautilus/" id="org.gnome.nautilus" gettext-domain="nautilus">
++  <schema path="/org/gnome/nautilus-groupes-test/" id="org.gnome.nautilus" gettext-domain="nautilus">
+     <child schema="org.gnome.nautilus.preferences" name="preferences"/>
+     <child schema="org.gnome.nautilus.compression" name="compression"/>
+     <child schema="org.gnome.nautilus.icon-view" name="icon-view"/>
+@@ -76,7 +76,18 @@
+     <child schema="org.gnome.nautilus.window-state" name="window-state"/>
+   </schema>
+ 
+-  <schema path="/org/gnome/nautilus/preferences/" id="org.gnome.nautilus.preferences" gettext-domain="nautilus">
++  <schema path="/org/gnome/nautilus-groupes-test/file-chooser/" id="org.gnome.Nautilus.GroupesTest.FileChooser">
++    <key type="b" name="show-hidden">
++      <default>false</default>
++      <summary>Show hidden files in Nautilus Groupes</summary>
++    </key>
++    <key type="b" name="sort-directories-first">
++      <default>true</default>
++      <summary>Show folders before files in Nautilus Groupes</summary>
++    </key>
++  </schema>
++
++  <schema path="/org/gnome/nautilus-groupes-test/preferences/" id="org.gnome.nautilus.preferences" gettext-domain="nautilus">
+     <key type="b" name="always-use-location-entry">
+       <default>false</default>
+       <summary>Always use the location entry, instead of the pathbar</summary>
+@@ -159,7 +170,7 @@
+         <alias value='compact-view' target='icon-view'/>
+         <alias value='list_view' target='list-view'/>
+       </aliases>
+-      <default>'icon-view'</default>
++      <default>'list-view'</default>
+       <summary>Default folder viewer</summary>
+       <description>When a folder is visited this viewer is used. Possible values are “list-view”, and “icon-view”.</description>
+     </key>
+@@ -190,7 +201,7 @@
+     </key>
+   </schema>
+ 
+-  <schema path="/org/gnome/nautilus/compression/" id="org.gnome.nautilus.compression" gettext-domain="nautilus">
++  <schema path="/org/gnome/nautilus-groupes-test/compression/" id="org.gnome.nautilus.compression" gettext-domain="nautilus">
+     <key name="default-compression-format" enum="org.gnome.nautilus.CompressionFormat">
+       <default>'zip'</default>
+       <summary>Default format for compressing files</summary>
+@@ -198,7 +209,7 @@
+     </key>
+   </schema>
+ 
+-  <schema path="/org/gnome/nautilus/icon-view/" id="org.gnome.nautilus.icon-view" gettext-domain="nautilus">
++  <schema path="/org/gnome/nautilus-groupes-test/icon-view/" id="org.gnome.nautilus.icon-view" gettext-domain="nautilus">
+     <key type="as" name="captions">
+       <default>[ 'none', 'none', 'none' ]</default>
+       <summary>List of possible captions on icons</summary>
+@@ -215,7 +226,7 @@
+     </key>
+   </schema>
+ 
+-  <schema path="/org/gnome/nautilus/list-view/" id="org.gnome.nautilus.list-view" gettext-domain="nautilus">
++  <schema path="/org/gnome/nautilus-groupes-test/list-view/" id="org.gnome.nautilus.list-view" gettext-domain="nautilus">
+     <key name="default-zoom-level" enum="org.gnome.nautilus.ListZoomLevel">
+       <aliases>
+         <alias value='standard' target='medium'/>
+@@ -239,7 +250,7 @@
+     </key>
+   </schema>
+ 
+-  <schema path="/org/gnome/nautilus/window-state/" id="org.gnome.nautilus.window-state" gettext-domain="nautilus">
++  <schema path="/org/gnome/nautilus-groupes-test/window-state/" id="org.gnome.nautilus.window-state" gettext-domain="nautilus">
+     <key type="(ii)" name="initial-size">
+       <default>(890, 550)</default>
+       <summary>Initial size of the window</summary>
+--- a/meson.build
++++ b/meson.build
+@@ -147,8 +147,8 @@
+ app_id_suffix = ''
+ 
+ if get_option('profile') == 'Devel'
+-  app_id_suffix = '.Devel'
+-  name_suffix = ' (Development Snapshot)'
++  app_id_suffix = '.GroupesTest'
++  name_suffix = ' (Groupes - test)'
+ endif
+ 
+ application_id = 'org.gnome.Nautilus' + app_id_suffix
+--- a/src/nautilus-application.c
++++ b/src/nautilus-application.c
+@@ -896,27 +896,45 @@
+ {
+     if (!g_settings_get_boolean (nautilus_preferences, NAUTILUS_PREFERENCES_MIGRATED_GTK_SETTINGS))
+     {
++        GSettingsSchemaSource *source = g_settings_schema_source_get_default ();
+         g_autoptr (GSettingsSchema) schema = NULL;
+-
+-        /* We don't depend on GTK 3. Check whether its schema is installed. */
+-        schema = g_settings_schema_source_lookup (g_settings_schema_source_get_default (),
+-                                                  "org.gtk.Settings.FileChooser",
++        g_autoptr (GSettings) source_settings = NULL;
++
++        /* Seed the private prototype settings from the user's current GTK 4
++         * preferences, but do not keep sharing the global GTK settings. */
++        schema = g_settings_schema_source_lookup (source,
++                                                  "org.gtk.gtk4.Settings.FileChooser",
+                                                   FALSE);
+         if (schema != NULL)
+         {
+-            g_autoptr (GSettings) gtk3_settings = NULL;
+-
+-            gtk3_settings = g_settings_new_with_path ("org.gtk.Settings.FileChooser",
+-                                                      "/org/gtk/settings/file-chooser/");
++            source_settings = g_settings_new ("org.gtk.gtk4.Settings.FileChooser");
++        }
++        else
++        {
++            /* Fallback for unusual systems where only the GTK 3 schema exists. */
++            g_clear_pointer (&schema, g_settings_schema_unref);
++            schema = g_settings_schema_source_lookup (source,
++                                                      "org.gtk.Settings.FileChooser",
++                                                      FALSE);
++            if (schema != NULL)
++            {
++                source_settings = g_settings_new_with_path ("org.gtk.Settings.FileChooser",
++                                                            "/org/gtk/settings/file-chooser/");
++            }
++        }
++
++        if (source_settings != NULL)
++        {
+             g_settings_set_boolean (gtk_filechooser_preferences,
+                                     NAUTILUS_PREFERENCES_SORT_DIRECTORIES_FIRST,
+-                                    g_settings_get_boolean (gtk3_settings,
++                                    g_settings_get_boolean (source_settings,
+                                                             NAUTILUS_PREFERENCES_SORT_DIRECTORIES_FIRST));
+             g_settings_set_boolean (gtk_filechooser_preferences,
+                                     NAUTILUS_PREFERENCES_SHOW_HIDDEN_FILES,
+-                                    g_settings_get_boolean (gtk3_settings,
++                                    g_settings_get_boolean (source_settings,
+                                                             NAUTILUS_PREFERENCES_SHOW_HIDDEN_FILES));
+         }
++
+         g_settings_set_boolean (nautilus_preferences,
+                                 NAUTILUS_PREFERENCES_MIGRATED_GTK_SETTINGS,
+                                 TRUE);
+--- a/src/nautilus-files-view.c
++++ b/src/nautilus-files-view.c
+@@ -629,9 +629,33 @@
+ }
+ 
+ static void
++save_group_state_for_directory (NautilusFilesView *self)
++{
++    if (self->directory_as_file == NULL || self->model == NULL) return;
++
++    g_auto (GStrv) collapsed = nautilus_view_model_dup_collapsed_groups (self->model);
++    nautilus_file_set_metadata_list (self->directory_as_file,
++                                     NAUTILUS_METADATA_KEY_GROUP_COLLAPSED_TYPES,
++                                     collapsed);
++}
++
++static void
++load_group_state_for_directory (NautilusFilesView *self)
++{
++    g_auto (GStrv) collapsed = NULL;
++
++    if (self->directory_as_file != NULL)
++        collapsed = nautilus_file_get_metadata_list (self->directory_as_file,
++                                                     NAUTILUS_METADATA_KEY_GROUP_COLLAPSED_TYPES);
++
++    nautilus_view_model_set_collapsed_groups (self->model, (const char * const *) collapsed);
++}
++
++static void
+ files_view_begin_loading (NautilusFilesView *self)
+ {
+     update_sort_order_from_metadata_and_preferences (self);
++    load_group_state_for_directory (self);
+ 
+     /* We could have changed to the trash directory or to searching, and then
+      * we need to update the menus */
+@@ -772,7 +796,16 @@
+     if (g_list_model_get_n_items (G_LIST_MODEL (self->model)) > 0)
+     {
+         self->in_auto_selection = is_auto;
+-        nautilus_list_base_set_cursor (self->list_base, 0, TRUE, TRUE);
++        guint n = g_list_model_get_n_items (G_LIST_MODEL (self->model));
++        for (guint i = 0; i < n; i++)
++        {
++            g_autoptr (NautilusViewItem) item = get_view_item (G_LIST_MODEL (self->model), i);
++            if (!nautilus_view_item_is_group (item))
++            {
++                nautilus_list_base_set_cursor (self->list_base, i, TRUE, TRUE);
++                break;
++            }
++        }
+         self->in_auto_selection = FALSE;
+     }
+ }
+@@ -891,6 +924,7 @@
+ 
+         item = NAUTILUS_VIEW_ITEM (gtk_tree_list_row_get_item (row));
+         file = nautilus_view_item_get_file (item);
++        if (file == NULL || nautilus_view_item_is_group (item)) continue;
+ 
+         selected_files = g_list_prepend (selected_files, g_object_ref (file));
+     }
+@@ -2545,6 +2579,17 @@
+ }
+ 
+ static void
++action_group_by_type (GSimpleAction *action, GVariant *value, gpointer user_data)
++{
++    NautilusFilesView *self = user_data;
++    g_simple_action_set_state (action, value);
++    if (NAUTILUS_IS_LIST_VIEW (self->list_base))
++        nautilus_list_view_set_group_by_type (NAUTILUS_LIST_VIEW (self->list_base), g_variant_get_boolean (value));
++    else if (NAUTILUS_IS_GRID_VIEW (self->list_base))
++        nautilus_grid_view_set_group_by_type (NAUTILUS_GRID_VIEW (self->list_base), g_variant_get_boolean (value));
++}
++
++static void
+ action_sort_order_changed (GSimpleAction *action,
+                            GVariant      *value,
+                            gpointer       user_data)
+@@ -3191,6 +3236,20 @@
+     /* Model must be set before the sort-state is bound, for a new sorter to be
+      * set on the model. */
+     nautilus_list_base_set_model (self->list_base, self->model);
++    GAction *group_action = g_action_map_lookup_action (G_ACTION_MAP (self->view_action_group), "group-by-type");
++    gboolean grouping_supported = NAUTILUS_IS_LIST_VIEW (self->list_base) || NAUTILUS_IS_GRID_VIEW (self->list_base);
++    g_simple_action_set_enabled (G_SIMPLE_ACTION (group_action), grouping_supported);
++    if (grouping_supported)
++    {
++        g_autoptr (GVariant) state = g_action_get_state (group_action);
++        gboolean enabled = g_variant_get_boolean (state);
++        if (NAUTILUS_IS_LIST_VIEW (self->list_base))
++            nautilus_list_view_set_group_by_type (NAUTILUS_LIST_VIEW (self->list_base), enabled);
++        else
++            nautilus_grid_view_set_group_by_type (NAUTILUS_GRID_VIEW (self->list_base), enabled);
++    }
++    else
++        nautilus_view_model_set_group_by_type (self->model, FALSE);
+     GAction *action = g_action_map_lookup_action (G_ACTION_MAP (self->view_action_group),
+                                                   "sort");
+     g_object_bind_property (G_SIMPLE_ACTION (action), "state",
+@@ -3231,6 +3290,8 @@
+     GList *node, *next;
+ 
+     self = NAUTILUS_FILES_VIEW (object);
++
++    save_group_state_for_directory (self);
+ 
+     self->in_destruction = TRUE;
+     nautilus_files_view_stop_loading (self);
+@@ -6812,6 +6873,7 @@
+     { .name = "zoom-standard", .activate = action_zoom_standard },
+     { .name = "sort", .parameter_type = "(sb)", .state = "('invalid',false)", .change_state = action_sort_order_changed },
+     { .name = "show-hidden-files", .state = "true", .change_state = action_show_hidden_files },
++    { .name = "group-by-type", .state = "true", .change_state = action_group_by_type },
+     { .name = "visible-columns", .activate = action_visible_columns },
+     { .name = "visible-captions", .activate = action_visible_captions },
+     /* Background menu */
+@@ -8499,6 +8561,7 @@
+         self->directory = nautilus_directory_ref (directory);
+     }
+ 
++    save_group_state_for_directory (self);
+     nautilus_file_unref (self->directory_as_file);
+     self->directory_as_file = nautilus_directory_get_corresponding_file (directory);
+ 
+--- a/src/nautilus-freedesktop-dbus.h
++++ b/src/nautilus-freedesktop-dbus.h
+@@ -23,8 +23,8 @@
+ #include <glib-object.h>
+ #include <gio/gio.h>
+ 
+-#define NAUTILUS_FDO_DBUS_IFACE "org.freedesktop.FileManager1"
+-#define NAUTILUS_FDO_DBUS_NAME  "org.freedesktop.FileManager1"
++#define NAUTILUS_FDO_DBUS_IFACE "org.gnome.Nautilus.GroupesTest.FileManager1"
++#define NAUTILUS_FDO_DBUS_NAME  "org.gnome.Nautilus.GroupesTest.FileManager1"
+ #define NAUTILUS_FDO_DBUS_PATH  "/org/freedesktop/FileManager1"
+ 
+ #define NAUTILUS_TYPE_FREEDESKTOP_DBUS nautilus_freedesktop_dbus_get_type()
+--- a/src/nautilus-global-preferences.c
++++ b/src/nautilus-global-preferences.c
+@@ -103,9 +103,9 @@
+     nautilus_window_state = g_settings_new ("org.gnome.nautilus.window-state");
+     nautilus_icon_view_preferences = g_settings_new ("org.gnome.nautilus.icon-view");
+     nautilus_list_view_preferences = g_settings_new ("org.gnome.nautilus.list-view");
+-    /* Some settings such as show hidden files are shared between Nautilus and GTK file chooser */
+-    gtk_filechooser_preferences = g_settings_new_with_path ("org.gtk.gtk4.Settings.FileChooser",
+-                                                            "/org/gtk/gtk4/settings/file-chooser/");
++    /* Keep the two file-chooser preferences used by this prototype private,
++     * so changing them here does not alter Fedora Nautilus or GTK dialogs. */
++    gtk_filechooser_preferences = g_settings_new ("org.gnome.Nautilus.GroupesTest.FileChooser");
+     gnome_lockdown_preferences = g_settings_new ("org.gnome.desktop.lockdown");
+     gnome_interface_preferences = g_settings_new ("org.gnome.desktop.interface");
+     gnome_privacy_preferences = g_settings_new ("org.gnome.desktop.privacy");
+--- a/src/nautilus-grid-view.c
++++ b/src/nautilus-grid-view.c
+@@ -21,6 +21,8 @@
+     NautilusListBase parent_instance;
+ 
+     GtkGridView *view_ui;
++    GtkBox *group_view_ui;
++    GListModel *group_roots_model;
+ 
+     gint zoom_level;
+ 
+@@ -30,6 +32,8 @@
+ 
+     GQuark sort_attribute;
+     gboolean reversed;
++    gboolean group_by_type;
++    gboolean rubberband_enabled;
+ };
+ 
+ G_DEFINE_TYPE (NautilusGridView, nautilus_grid_view, NAUTILUS_TYPE_LIST_BASE)
+@@ -224,6 +228,24 @@
+     g_autoptr (GtkShortcutTrigger) direction_trigger = NULL;
+     g_autoptr (GListModel) controllers = NULL;
+     gboolean success = FALSE;
++    GtkWidget *grid_target = GTK_WIDGET (self->view_ui);
++
++    if (self->group_by_type)
++    {
++        GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (self));
++        GtkWidget *focus = root != NULL ? gtk_root_get_focus (root) : NULL;
++
++        for (GtkWidget *widget = focus; widget != NULL; widget = gtk_widget_get_parent (widget))
++        {
++            if (GTK_IS_GRID_VIEW (widget))
++            {
++                grid_target = widget;
++                break;
++            }
++            if (widget == GTK_WIDGET (self))
++                break;
++        }
++    }
+ 
+     /* We want the same behavior as when the user presses the arrow keys while
+      * the focus is in the view. So, let's get the matching arrow key. */
+@@ -268,7 +290,7 @@
+     /* Then we iterate over the shortcut installed in GtkGridView until we find
+      * a matching trigger. There may be multiple shortcut controllers, and each
+      * shortcut controller may hold multiple shortcuts each. Let's loop. */
+-    controllers = gtk_widget_observe_controllers (GTK_WIDGET (self->view_ui));
++    controllers = gtk_widget_observe_controllers (grid_target);
+     for (guint i = 0; i < g_list_model_get_n_items (controllers); i++)
+     {
+         g_autoptr (GtkEventController) controller = g_list_model_get_item (controllers, i);
+@@ -288,7 +310,7 @@
+                 /* Match found. Activate the action to move cursor. */
+                 success = gtk_shortcut_action_activate (gtk_shortcut_get_action (shortcut),
+                                                         0,
+-                                                        GTK_WIDGET (self->view_ui),
++                                                        grid_target,
+                                                         gtk_shortcut_get_arguments (shortcut));
+                 break;
+             }
+@@ -317,6 +339,15 @@
+                              gpointer     user_data)
+ {
+     NautilusGridView *self = NAUTILUS_GRID_VIEW (user_data);
++    NautilusViewModel *model = nautilus_list_base_get_model (NAUTILUS_LIST_BASE (self));
++    g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (model), position);
++    g_autoptr (NautilusViewItem) item = row ? gtk_tree_list_row_get_item (row) : NULL;
++
++    if (item != NULL && nautilus_view_item_is_group (item))
++    {
++        gtk_tree_list_row_set_expanded (row, !gtk_tree_list_row_get_expanded (row));
++        return;
++    }
+ 
+     nautilus_list_base_activate_selection (NAUTILUS_LIST_BASE (self), FALSE);
+ }
+@@ -345,7 +376,50 @@
+ {
+     NautilusGridView *self = NAUTILUS_GRID_VIEW (list_base_view);
+ 
+-    gtk_grid_view_scroll_to (self->view_ui, position, flags, scroll);
++    if (!self->group_by_type)
++    {
++        gtk_grid_view_scroll_to (self->view_ui, position, flags, scroll);
++        return;
++    }
++
++    NautilusViewModel *model = nautilus_list_base_get_model (list_base_view);
++    g_autoptr (GtkTreeListRow) row = model != NULL ? g_list_model_get_item (G_LIST_MODEL (model), position) : NULL;
++    g_autoptr (NautilusViewItem) item = row != NULL ? gtk_tree_list_row_get_item (row) : NULL;
++    guint group_position = 0;
++    guint child_position = 0;
++
++    if (item == NULL ||
++        !nautilus_view_model_find_group_item (model, item, &group_position, &child_position))
++        return;
++
++    if ((flags & GTK_LIST_SCROLL_SELECT) != 0)
++        gtk_selection_model_select_item (GTK_SELECTION_MODEL (model), position, TRUE);
++
++    GtkWidget *group_widget = gtk_widget_get_first_child (GTK_WIDGET (self->group_view_ui));
++    for (guint i = 0; group_widget != NULL && i < group_position; i++)
++        group_widget = gtk_widget_get_next_sibling (group_widget);
++
++    if (group_widget != NULL)
++    {
++        graphene_rect_t bounds;
++        if (gtk_widget_compute_bounds (group_widget,
++                                       GTK_WIDGET (self->group_view_ui),
++                                       &bounds))
++        {
++            GtkScrolledWindow *scrolled = GTK_SCROLLED_WINDOW (nautilus_list_base_get_scrolled_window (list_base_view));
++            GtkAdjustment *vadjustment = gtk_scrolled_window_get_vadjustment (scrolled);
++            gtk_adjustment_clamp_page (vadjustment,
++                                       bounds.origin.y,
++                                       bounds.origin.y + MAX (1.0f, bounds.size.height));
++        }
++    }
++
++    if ((flags & GTK_LIST_SCROLL_FOCUS) != 0)
++    {
++        GtkWidget *cell = nautilus_view_item_get_item_ui (item);
++        if (cell != NULL)
++            gtk_widget_grab_focus (cell);
++    }
+ }
+ 
+ static GVariant *
+@@ -359,12 +433,28 @@
+ }
+ 
+ static void
++set_rubberband_recursively (GtkWidget *widget,
++                            gboolean   enabled)
++{
++    if (GTK_IS_GRID_VIEW (widget))
++        gtk_grid_view_set_enable_rubberband (GTK_GRID_VIEW (widget), enabled);
++
++    for (GtkWidget *child = gtk_widget_get_first_child (widget);
++         child != NULL;
++         child = gtk_widget_get_next_sibling (child))
++        set_rubberband_recursively (child, enabled);
++}
++
++static void
+ real_set_enable_rubberband (NautilusListBase *list_base,
+                             gboolean          enabled)
+ {
+     NautilusGridView *self = NAUTILUS_GRID_VIEW (list_base);
+ 
++    self->rubberband_enabled = enabled;
+     gtk_grid_view_set_enable_rubberband (self->view_ui, enabled);
++    if (self->group_view_ui != NULL)
++        set_rubberband_recursively (GTK_WIDGET (self->group_view_ui), enabled);
+ }
+ 
+ static void
+@@ -399,6 +489,21 @@
+ static void
+ dispose (GObject *object)
+ {
++    NautilusGridView *self = NAUTILUS_GRID_VIEW (object);
++    GtkWidget *scrolled_window = nautilus_list_base_get_scrolled_window (NAUTILUS_LIST_BASE (self));
++
++    if (self->view_ui != NULL)
++        gtk_grid_view_set_model (self->view_ui, NULL);
++    if (scrolled_window != NULL)
++        gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled_window), NULL);
++
++    if (self->group_roots_model != NULL)
++        g_signal_handlers_disconnect_by_data (self->group_roots_model, self);
++
++    g_clear_object (&self->view_ui);
++    g_clear_object (&self->group_view_ui);
++    g_clear_object (&self->group_roots_model);
++
+     G_OBJECT_CLASS (nautilus_grid_view_parent_class)->dispose (object);
+ }
+ 
+@@ -408,6 +513,7 @@
+     G_OBJECT_CLASS (nautilus_grid_view_parent_class)->finalize (object);
+ }
+ 
++/* Flat (ungrouped) grid --------------------------------------------------- */
+ static void
+ bind_cell (GtkSignalListItemFactory *factory,
+            GtkListItem              *listitem,
+@@ -426,9 +532,6 @@
+     {
+         GtkWidget *parent;
+ 
+-        /* At the time of ::setup emission, the item ui has got no parent yet,
+-         * that's why we need to complete the widget setup process here, on the
+-         * first time ::bind is emitted. */
+         parent = gtk_widget_get_parent (cell);
+         gtk_widget_set_halign (parent, GTK_ALIGN_CENTER);
+         gtk_widget_set_valign (parent, GTK_ALIGN_START);
+@@ -440,15 +543,10 @@
+              GtkListItem              *listitem,
+              gpointer                  user_data)
+ {
+-    g_autoptr (NautilusViewItem) item = NULL;
+-
+-    item = get_view_item (listitem);
+-
+-    /* item may be NULL when row has just been destroyed. */
++    g_autoptr (NautilusViewItem) item = get_view_item (listitem);
++
+     if (item != NULL)
+-    {
+         nautilus_view_item_set_item_ui (item, NULL);
+-    }
+ }
+ 
+ static void
+@@ -471,8 +569,6 @@
+ 
+     nautilus_grid_cell_set_caption_attributes (cell, self->caption_attributes);
+ 
+-    /* Use file display name as accessible label. Explaining in pseudo-code:
+-     * listitem:accessible-name :- listitem:item:item:file:a11y-name */
+     expression = gtk_property_expression_new (GTK_TYPE_LIST_ITEM, NULL, "item");
+     expression = gtk_property_expression_new (GTK_TYPE_TREE_LIST_ROW, expression, "item");
+     expression = gtk_property_expression_new (NAUTILUS_TYPE_VIEW_ITEM, expression, "file");
+@@ -480,38 +576,410 @@
+     gtk_expression_bind (expression, listitem, "accessible-label", listitem);
+ }
+ 
+-static void
+-on_model_changed (NautilusGridView *self)
+-{
++/* Grouped grid: vertical groups, one non-scrollable GtkFlowBox per group.
++ *
++ * GtkGridView/GtkListView implement GtkScrollable and are designed to be the
++ * direct child of a GtkScrolledWindow. Nesting one such view per group inside
++ * another scrolling container gives them an incorrect natural height (often
++ * the one-column height), which creates huge blank gaps. GtkFlowBox is a
++ * regular height-for-width widget and is therefore appropriate here: it wraps
++ * files into rows and requests exactly the height needed for those rows. */
++typedef struct
++{
++    NautilusGridView *view; /* unowned */
++    GtkToggleButton *toggle;
++    GtkImage *arrow;
++    GtkLabel *label;
++    GtkFlowBox *flow;
++    NautilusViewItem *group;
++    NautilusViewModel *model;
++    GBinding *title_binding;
++    gulong model_selection_handler;
++    gulong model_items_handler;
++    GdkModifierType selection_modifiers;
++    gboolean updating;
++    gboolean syncing_selection;
++} GroupRowData;
++
++typedef struct
++{
++    NautilusViewItem *item;
++    GtkWidget *cell; /* unowned, valid while destroy notify runs */
++} GroupFlowCellData;
++
++static guint
++group_flow_item_global_position (GroupRowData     *data,
++                                 NautilusViewItem *item)
++{
++    if (data->model == NULL || item == NULL)
++        return GTK_INVALID_LIST_POSITION;
++
++    return nautilus_view_model_get_position_for_item (data->model, item);
++}
++
++static void
++group_flow_cell_data_free (gpointer user_data)
++{
++    GroupFlowCellData *data = user_data;
++
++    if (data->item != NULL &&
++        nautilus_view_item_get_item_ui (data->item) == data->cell)
++        nautilus_view_item_set_item_ui (data->item, NULL);
++
++    g_clear_object (&data->item);
++    g_free (data);
++}
++
++static GtkWidget *
++create_group_flow_cell (gpointer item_object,
++                        gpointer user_data)
++{
++    GroupRowData *data = user_data;
++    NautilusViewItem *item = NAUTILUS_VIEW_ITEM (item_object);
++    NautilusGridCell *cell = nautilus_grid_cell_new (NAUTILUS_LIST_BASE (data->view));
++    guint global_position = group_flow_item_global_position (data, item);
++    GroupFlowCellData *cell_data = g_new0 (GroupFlowCellData, 1);
++
++    /* NautilusGridCell updates its icon as soon as an item is bound.
++     * Initialise the icon size and captions first; otherwise the bind callback
++     * can call nautilus_file_get_icon_paintable() with icon-size == 0. */
++    g_object_bind_property (data->view, "icon-size",
++                            cell, "icon-size",
++                            G_BINDING_SYNC_CREATE);
++    nautilus_grid_cell_set_caption_attributes (cell, data->view->caption_attributes);
++
++    setup_cell_common_item (NAUTILUS_VIEW_CELL (cell), item, global_position);
++    setup_cell_hover (NAUTILUS_VIEW_CELL (cell));
++
++    gtk_widget_set_halign (GTK_WIDGET (cell), GTK_ALIGN_CENTER);
++    gtk_widget_set_valign (GTK_WIDGET (cell), GTK_ALIGN_START);
++    nautilus_view_item_set_item_ui (item, GTK_WIDGET (cell));
++
++    cell_data->item = g_object_ref (item);
++    cell_data->cell = GTK_WIDGET (cell);
++    g_object_set_data_full (G_OBJECT (cell),
++                            "nautilus-group-flow-cell-data",
++                            cell_data,
++                            group_flow_cell_data_free);
++
++    return GTK_WIDGET (cell);
++}
++
++static NautilusViewItem *
++group_flow_child_get_item (GtkFlowBoxChild *child)
++{
++    GtkWidget *cell = gtk_flow_box_child_get_child (child);
++
++    if (!NAUTILUS_IS_VIEW_CELL (cell))
++        return NULL;
++
++    return nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (cell));
++}
++
++static void
++refresh_group_flow_positions (GroupRowData *data)
++{
++    if (data->flow == NULL || data->model == NULL)
++        return;
++
++    for (gint i = 0; ; i++)
++    {
++        GtkFlowBoxChild *child = gtk_flow_box_get_child_at_index (data->flow, i);
++        if (child == NULL)
++            break;
++
++        GtkWidget *cell = gtk_flow_box_child_get_child (child);
++        g_autoptr (NautilusViewItem) item = group_flow_child_get_item (child);
++        guint global_position = group_flow_item_global_position (data, item);
++
++        if (NAUTILUS_IS_VIEW_CELL (cell))
++            g_object_set (cell, "position", global_position, NULL);
++    }
++}
++
++static void
++sync_group_flow_selection_from_model (GroupRowData *data)
++{
++    if (data->flow == NULL || data->model == NULL || data->syncing_selection)
++        return;
++
++    data->syncing_selection = TRUE;
++
++    for (gint i = 0; ; i++)
++    {
++        GtkFlowBoxChild *child = gtk_flow_box_get_child_at_index (data->flow, i);
++        if (child == NULL)
++            break;
++
++        g_autoptr (NautilusViewItem) item = group_flow_child_get_item (child);
++        guint global_position = group_flow_item_global_position (data, item);
++        gboolean selected = global_position != GTK_INVALID_LIST_POSITION &&
++                            gtk_selection_model_is_selected (GTK_SELECTION_MODEL (data->model),
++                                                             global_position);
++
++        if (selected && !gtk_flow_box_child_is_selected (child))
++            gtk_flow_box_select_child (data->flow, child);
++        else if (!selected && gtk_flow_box_child_is_selected (child))
++            gtk_flow_box_unselect_child (data->flow, child);
++    }
++
++    data->syncing_selection = FALSE;
++}
++
++static void
++on_group_parent_selection_changed (GtkSelectionModel *model,
++                                   guint              position,
++                                   guint              n_items,
++                                   GroupRowData      *data)
++{
++    sync_group_flow_selection_from_model (data);
++}
++
++static void
++on_group_parent_items_changed (GListModel   *model,
++                               guint         position,
++                               guint         removed,
++                               guint         added,
++                               GroupRowData *data)
++{
++    refresh_group_flow_positions (data);
++    sync_group_flow_selection_from_model (data);
++}
++
++static void
++on_group_flow_pressed (GtkGestureClick *gesture,
++                       gint             n_press,
++                       gdouble          x,
++                       gdouble          y,
++                       gpointer         user_data)
++{
++    GroupRowData *data = user_data;
++
++    if (gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (gesture)) == GDK_BUTTON_PRIMARY)
++        data->selection_modifiers = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (gesture));
++}
++
++static void
++on_group_flow_selection_changed (GtkFlowBox *flow,
++                                 gpointer    user_data)
++{
++    GroupRowData *data = user_data;
++
++    if (data->syncing_selection || data->model == NULL)
++        return;
++
++    GdkModifierType modifiers = data->selection_modifiers;
++    gboolean preserve_other_groups = (modifiers & (GDK_CONTROL_MASK | GDK_SHIFT_MASK)) != 0;
++
++    data->syncing_selection = TRUE;
++
++    if (!preserve_other_groups)
++        gtk_selection_model_unselect_all (GTK_SELECTION_MODEL (data->model));
++
++    for (gint i = 0; ; i++)
++    {
++        GtkFlowBoxChild *child = gtk_flow_box_get_child_at_index (flow, i);
++        if (child == NULL)
++            break;
++
++        g_autoptr (NautilusViewItem) item = group_flow_child_get_item (child);
++        guint global_position = group_flow_item_global_position (data, item);
++        if (global_position == GTK_INVALID_LIST_POSITION)
++            continue;
++
++        if (gtk_flow_box_child_is_selected (child))
++            gtk_selection_model_select_item (GTK_SELECTION_MODEL (data->model),
++                                             global_position,
++                                             FALSE);
++        else if (preserve_other_groups &&
++                 gtk_selection_model_is_selected (GTK_SELECTION_MODEL (data->model), global_position))
++            gtk_selection_model_unselect_item (GTK_SELECTION_MODEL (data->model), global_position);
++    }
++
++    data->syncing_selection = FALSE;
++    data->selection_modifiers = 0;
++}
++
++static void
++update_group_arrow (GroupRowData *data)
++{
++    gtk_image_set_from_icon_name (data->arrow,
++                                  gtk_toggle_button_get_active (data->toggle) ?
++                                  "pan-down-symbolic" : "pan-end-symbolic");
++}
++
++static void
++on_group_toggle (GtkToggleButton *toggle,
++                 gpointer         user_data)
++{
++    GroupRowData *data = user_data;
++
++    if (data->updating || data->group == NULL)
++        return;
++
++    gboolean expanded = gtk_toggle_button_get_active (toggle);
++    const char *key = nautilus_view_item_get_group_key (data->group);
++
++    if (data->model != NULL && key != NULL)
++        nautilus_view_model_set_group_collapsed (data->model, key, !expanded);
++
++    gtk_widget_set_visible (GTK_WIDGET (data->flow), expanded);
++    update_group_arrow (data);
++}
++
++static void
++clear_group_row (GroupRowData *data)
++{
++    if (data->title_binding != NULL)
++    {
++        g_binding_unbind (data->title_binding);
++        g_clear_object (&data->title_binding);
++    }
++
++    /* GtkFlowBox owns and tears down its model binding during widget disposal.
++     * At this point the child FlowBox may already have been finalized, so an
++     * explicit gtk_flow_box_bind_model(NULL) would dereference a stale pointer. */
++
++    if (data->model != NULL)
++    {
++        if (data->model_selection_handler != 0)
++            g_signal_handler_disconnect (data->model, data->model_selection_handler);
++        if (data->model_items_handler != 0)
++            g_signal_handler_disconnect (data->model, data->model_items_handler);
++    }
++
++    g_clear_object (&data->model);
++    g_clear_object (&data->group);
++}
++
++static void
++group_row_data_free (gpointer user_data)
++{
++    GroupRowData *data = user_data;
++    clear_group_row (data);
++    g_free (data);
++}
++
++static GtkWidget *
++create_group_block (NautilusGridView *self,
++                    NautilusViewItem *group)
++{
++    GroupRowData *data = g_new0 (GroupRowData, 1);
++    GtkWidget *container = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
++    GtkWidget *header = gtk_toggle_button_new ();
++    GtkWidget *header_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
++    GtkWidget *arrow = gtk_image_new_from_icon_name ("pan-down-symbolic");
++    GtkWidget *label = gtk_label_new (NULL);
++    GtkWidget *flow = gtk_flow_box_new ();
+     NautilusViewModel *model = nautilus_list_base_get_model (NAUTILUS_LIST_BASE (self));
+ 
++    data->view = self;
++    data->toggle = GTK_TOGGLE_BUTTON (header);
++    data->arrow = GTK_IMAGE (arrow);
++    data->label = GTK_LABEL (label);
++    data->flow = GTK_FLOW_BOX (flow);
++    data->group = g_object_ref (group);
++    data->model = model != NULL ? g_object_ref (model) : NULL;
++
++    gtk_widget_add_css_class (container, "group-block");
++    gtk_widget_set_hexpand (container, TRUE);
++    gtk_widget_set_vexpand (container, FALSE);
++    gtk_widget_set_valign (container, GTK_ALIGN_START);
++
++    gtk_widget_add_css_class (header, "flat");
++    gtk_widget_set_halign (header, GTK_ALIGN_FILL);
++    gtk_widget_set_hexpand (header, TRUE);
++    gtk_widget_set_margin_top (header, 6);
++    gtk_widget_set_margin_start (header, 8);
++    gtk_widget_set_margin_end (header, 8);
++
++    gtk_label_set_xalign (GTK_LABEL (label), 0.0);
++    gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
++    gtk_widget_add_css_class (label, "heading");
++    gtk_widget_set_hexpand (label, TRUE);
++
++    gtk_box_append (GTK_BOX (header_box), arrow);
++    gtk_box_append (GTK_BOX (header_box), label);
++    gtk_button_set_child (GTK_BUTTON (header), header_box);
++
++    gtk_orientable_set_orientation (GTK_ORIENTABLE (flow), GTK_ORIENTATION_HORIZONTAL);
++    gtk_flow_box_set_activate_on_single_click (GTK_FLOW_BOX (flow), FALSE);
++    gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (flow), 1);
++    gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (flow), 20);
++    gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (flow), 6);
++    gtk_flow_box_set_row_spacing (GTK_FLOW_BOX (flow), 6);
++    gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (flow), TRUE);
++    gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (flow),
++                                     model != NULL && nautilus_view_model_get_single_selection (model) ?
++                                     GTK_SELECTION_SINGLE : GTK_SELECTION_MULTIPLE);
++    gtk_widget_add_css_class (flow, "group-flow");
++    gtk_widget_set_hexpand (flow, TRUE);
++    gtk_widget_set_vexpand (flow, FALSE);
++    gtk_widget_set_valign (flow, GTK_ALIGN_START);
++
++    GtkGesture *selection_gesture = gtk_gesture_click_new ();
++    gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (selection_gesture), GTK_PHASE_CAPTURE);
++    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (selection_gesture), GDK_BUTTON_PRIMARY);
++    g_signal_connect (selection_gesture, "pressed", G_CALLBACK (on_group_flow_pressed), data);
++    gtk_widget_add_controller (flow, GTK_EVENT_CONTROLLER (selection_gesture));
++
++    g_signal_connect (flow, "selected-children-changed",
++                      G_CALLBACK (on_group_flow_selection_changed), data);
++    gtk_box_append (GTK_BOX (container), header);
++    gtk_box_append (GTK_BOX (container), flow);
++
++    data->title_binding = g_object_ref (g_object_bind_property (group,
++                                                                "group-title",
++                                                                data->label,
++                                                                "label",
++                                                                G_BINDING_SYNC_CREATE));
++
+     if (model != NULL)
+     {
+-        gtk_grid_view_set_enable_rubberband (GTK_GRID_VIEW (self->view_ui),
+-                                             !nautilus_view_model_get_single_selection (model));
+-    }
+-
+-    gtk_grid_view_set_model (self->view_ui, GTK_SELECTION_MODEL (model));
+-}
++        GListStore *children = nautilus_view_item_get_group_children (group);
++        gtk_flow_box_bind_model (data->flow,
++                                 G_LIST_MODEL (children),
++                                 create_group_flow_cell,
++                                 data,
++                                 NULL);
++        data->model_selection_handler =
++            g_signal_connect (model, "selection-changed",
++                              G_CALLBACK (on_group_parent_selection_changed), data);
++        data->model_items_handler =
++            g_signal_connect (model, "items-changed",
++                              G_CALLBACK (on_group_parent_items_changed), data);
++        refresh_group_flow_positions (data);
++        sync_group_flow_selection_from_model (data);
++    }
++
++    const char *key = nautilus_view_item_get_group_key (group);
++    gboolean expanded = model == NULL || !nautilus_view_model_get_group_collapsed (model, key);
++    data->updating = TRUE;
++    gtk_toggle_button_set_active (data->toggle, expanded);
++    data->updating = FALSE;
++    gtk_widget_set_visible (flow, expanded);
++    update_group_arrow (data);
++
++    g_signal_connect (header, "toggled", G_CALLBACK (on_group_toggle), data);
++    g_object_set_data_full (G_OBJECT (container),
++                            "nautilus-group-row-data",
++                            data,
++                            group_row_data_free);
++
++    return container;
++}
++
+ static GtkGridView *
+-create_view_ui (NautilusGridView *self)
+-{
+-    GtkListItemFactory *factory;
++create_flat_view_ui (NautilusGridView *self)
++{
++    GtkListItemFactory *factory = gtk_signal_list_item_factory_new ();
+     GtkWidget *widget;
+ 
+-    factory = gtk_signal_list_item_factory_new ();
+     g_signal_connect (factory, "setup", G_CALLBACK (setup_cell), self);
+     g_signal_connect (factory, "bind", G_CALLBACK (bind_cell), self);
+     g_signal_connect (factory, "unbind", G_CALLBACK (unbind_cell), self);
+ 
+     widget = gtk_grid_view_new (NULL, factory);
+-
+-    /* We don't use the built-in child activation feature for clicks because it
+-     * doesn't fill all our needs nor does it match our expected behavior.
+-     * Instead, we roll our own event handling and double/single click mode.
+-     * However, GtkGridView:single-click-activate has other effects besides
+-     * activation, as it affects the selection behavior as well (e.g. selects on
+-     * hover). Setting it to FALSE gives us the expected behavior. */
+     gtk_grid_view_set_single_click_activate (GTK_GRID_VIEW (widget), FALSE);
+     gtk_grid_view_set_max_columns (GTK_GRID_VIEW (widget), 20);
+     gtk_grid_view_set_tab_behavior (GTK_GRID_VIEW (widget), GTK_LIST_TAB_ITEM);
+@@ -522,13 +990,164 @@
+                                     GTK_ACCESSIBLE_PROPERTY_ROLE_DESCRIPTION,
+                                     _("View of the current location"),
+                                     -1);
+-
+-    /* While we don't want to use GTK's click activation, we'll let it handle
+-     * the key activation part (with Enter).
+-     */
+     g_signal_connect (widget, "activate", G_CALLBACK (on_grid_view_item_activated), self);
+ 
+     return GTK_GRID_VIEW (widget);
++}
++
++static gboolean
++on_group_view_key_pressed (GtkEventControllerKey *controller,
++                           guint                  keyval,
++                           guint                  keycode,
++                           GdkModifierType        state,
++                           gpointer               user_data)
++{
++    NautilusGridView *self = NAUTILUS_GRID_VIEW (user_data);
++
++    if ((state & GDK_CONTROL_MASK) == 0 || (keyval != GDK_KEY_a && keyval != GDK_KEY_A))
++        return FALSE;
++
++    NautilusViewModel *model = nautilus_list_base_get_model (NAUTILUS_LIST_BASE (self));
++    if (model == NULL)
++        return FALSE;
++
++    if ((state & GDK_SHIFT_MASK) != 0)
++        gtk_selection_model_unselect_all (GTK_SELECTION_MODEL (model));
++    else
++        gtk_selection_model_select_all (GTK_SELECTION_MODEL (model));
++
++    return TRUE;
++}
++
++static GtkBox *
++create_group_view_ui (NautilusGridView *self)
++{
++    GtkWidget *widget = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
++
++    gtk_widget_add_css_class (widget, "grouped-grid");
++    gtk_widget_set_hexpand (widget, TRUE);
++    gtk_widget_set_vexpand (widget, FALSE);
++    gtk_widget_set_valign (widget, GTK_ALIGN_START);
++
++    GtkEventController *key_controller = GTK_EVENT_CONTROLLER (gtk_event_controller_key_new ());
++    gtk_event_controller_set_propagation_phase (key_controller, GTK_PHASE_CAPTURE);
++    g_signal_connect (key_controller, "key-pressed", G_CALLBACK (on_group_view_key_pressed), self);
++    gtk_widget_add_controller (widget, key_controller);
++
++    gtk_accessible_update_property (GTK_ACCESSIBLE (widget),
++                                    GTK_ACCESSIBLE_PROPERTY_LABEL,
++                                    _("Content View"),
++                                    GTK_ACCESSIBLE_PROPERTY_ROLE_DESCRIPTION,
++                                    _("Grouped grid view of the current location"),
++                                    -1);
++
++    return GTK_BOX (widget);
++}
++
++static void
++clear_group_blocks (NautilusGridView *self)
++{
++    GtkWidget *child;
++
++    if (self->group_view_ui == NULL)
++        return;
++
++    while ((child = gtk_widget_get_first_child (GTK_WIDGET (self->group_view_ui))) != NULL)
++        gtk_box_remove (self->group_view_ui, child);
++}
++
++static void
++rebuild_group_blocks (NautilusGridView *self)
++{
++    clear_group_blocks (self);
++
++    if (!self->group_by_type || self->group_roots_model == NULL)
++        return;
++
++    guint n = g_list_model_get_n_items (self->group_roots_model);
++    for (guint i = 0; i < n; i++)
++    {
++        g_autoptr (NautilusViewItem) group = g_list_model_get_item (self->group_roots_model, i);
++        if (group == NULL || !nautilus_view_item_is_group (group))
++            continue;
++
++        gtk_box_append (self->group_view_ui, create_group_block (self, group));
++    }
++
++    set_rubberband_recursively (GTK_WIDGET (self->group_view_ui), self->rubberband_enabled);
++}
++
++static void
++on_group_roots_items_changed (GListModel       *model,
++                              guint             position,
++                              guint             removed,
++                              guint             added,
++                              NautilusGridView *self)
++{
++    rebuild_group_blocks (self);
++}
++
++static void
++set_group_roots_model (NautilusGridView *self,
++                       GListModel       *model)
++{
++    if (self->group_roots_model == model)
++        return;
++
++    if (self->group_roots_model != NULL)
++        g_signal_handlers_disconnect_by_func (self->group_roots_model,
++                                              on_group_roots_items_changed,
++                                              self);
++    g_clear_object (&self->group_roots_model);
++    if (model != NULL)
++    {
++        self->group_roots_model = g_object_ref (model);
++        g_signal_connect_object (model,
++                                 "items-changed",
++                                 G_CALLBACK (on_group_roots_items_changed),
++                                 self,
++                                 0);
++    }
++}
++
++static void
++update_presentation (NautilusGridView *self)
++{
++    NautilusViewModel *model = nautilus_list_base_get_model (NAUTILUS_LIST_BASE (self));
++    GtkScrolledWindow *scrolled = GTK_SCROLLED_WINDOW (nautilus_list_base_get_scrolled_window (NAUTILUS_LIST_BASE (self)));
++
++    if (model != NULL)
++    {
++        nautilus_view_model_set_group_by_type (model, self->group_by_type);
++        self->rubberband_enabled = !nautilus_view_model_get_single_selection (model);
++    }
++
++    if (self->group_by_type)
++    {
++        gtk_grid_view_set_model (self->view_ui, NULL);
++
++        g_autoptr (GListModel) groups = model != NULL ?
++                                        nautilus_view_model_dup_group_roots_model (model) : NULL;
++        set_group_roots_model (self, groups);
++        rebuild_group_blocks (self);
++
++        gtk_scrolled_window_set_child (scrolled, GTK_WIDGET (self->group_view_ui));
++    }
++    else
++    {
++        set_group_roots_model (self, NULL);
++        clear_group_blocks (self);
++        gtk_grid_view_set_model (self->view_ui,
++                                 model != NULL ? GTK_SELECTION_MODEL (model) : NULL);
++        gtk_grid_view_set_enable_rubberband (self->view_ui, self->rubberband_enabled);
++        gtk_scrolled_window_set_child (scrolled, GTK_WIDGET (self->view_ui));
++    }
++}
++
++static void
++on_model_changed (NautilusGridView *self)
++{
++    update_presentation (self);
+ }
+ 
+ static void
+@@ -557,6 +1176,8 @@
+ {
+     GtkWidget *scrolled_window = nautilus_list_base_get_scrolled_window (NAUTILUS_LIST_BASE (self));
+ 
++    self->group_by_type = TRUE;
++    self->rubberband_enabled = TRUE;
+     gtk_widget_add_css_class (GTK_WIDGET (self), "nautilus-grid-view");
+ 
+     set_captions_from_preferences (self);
+@@ -567,13 +1188,14 @@
+                              G_CONNECT_SWAPPED);
+ 
+ 
+-    self->view_ui = create_view_ui (self);
++    self->view_ui = g_object_ref_sink (create_flat_view_ui (self));
++    self->group_view_ui = g_object_ref_sink (create_group_view_ui (self));
+     nautilus_list_base_setup_gestures (NAUTILUS_LIST_BASE (self));
+ 
+     g_signal_connect_swapped (self, "notify::model", G_CALLBACK (on_model_changed), self);
+ 
+     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled_window),
+-                                   GTK_WIDGET (self->view_ui));
++                                   GTK_WIDGET (self->group_view_ui));
+ 
+     g_signal_connect_object (gtk_filechooser_preferences,
+                              "changed::" NAUTILUS_PREFERENCES_SORT_DIRECTORIES_FIRST,
+@@ -589,3 +1211,15 @@
+ {
+     return g_object_new (NAUTILUS_TYPE_GRID_VIEW, NULL);
+ }
++
++void
++nautilus_grid_view_set_group_by_type (NautilusGridView *self, gboolean enabled)
++{
++    g_return_if_fail (NAUTILUS_IS_GRID_VIEW (self));
++
++    if (self->group_by_type == enabled)
++        return;
++
++    self->group_by_type = enabled;
++    update_presentation (self);
++}
+--- a/src/nautilus-grid-view.h
++++ b/src/nautilus-grid-view.h
+@@ -16,4 +16,5 @@
+ 
+ NautilusGridView *nautilus_grid_view_new (void);
+ 
++void nautilus_grid_view_set_group_by_type (NautilusGridView *self, gboolean enabled);
+ G_END_DECLS
+--- a/src/nautilus-list-base-private.h
++++ b/src/nautilus-list-base-private.h
+@@ -27,6 +27,11 @@
+ /* Shareable helpers */
+ void                          setup_cell_common                 (GObject          *listitem,
+                                                                  NautilusViewCell *cell);
++void                          setup_cell_common_direct          (GObject          *listitem,
++                                                                 NautilusViewCell *cell);
++void                          setup_cell_common_item            (NautilusViewCell *cell,
++                                                                 NautilusViewItem *item,
++                                                                 guint             position);
+ void                          setup_cell_hover                  (NautilusViewCell *cell);
+ void                          setup_cell_hover_inner_target     (NautilusViewCell *cell,
+                                                                  GtkWidget        *target);
+--- a/src/nautilus-list-base.c
++++ b/src/nautilus-list-base.c
+@@ -861,18 +861,17 @@
+     return accepted;
+ }
+ 
+-void
+-setup_cell_common (GObject          *listitem,
+-                   NautilusViewCell *cell)
+-{
+-    GtkExpression *expression;
++static NautilusViewItem *
++file_item_expression (gpointer unused, NautilusViewItem *item)
++{
++    return item != NULL && !nautilus_view_item_is_group (item) ? g_object_ref (item) : NULL;
++}
++
++static void
++setup_cell_controllers (NautilusViewCell *cell)
++{
+     GtkEventController *controller;
+     GtkDropTarget *drop_target;
+-
+-    expression = gtk_property_expression_new (GTK_TYPE_LIST_ITEM, NULL, "item");
+-    expression = gtk_property_expression_new (GTK_TYPE_TREE_LIST_ROW, expression, "item");
+-    gtk_expression_bind (expression, cell, "item", listitem);
+-    g_object_bind_property (listitem, "position", cell, "position", G_BINDING_SYNC_CREATE);
+ 
+     controller = GTK_EVENT_CONTROLLER (gtk_gesture_click_new ());
+     gtk_widget_add_controller (GTK_WIDGET (cell), controller);
+@@ -904,6 +903,49 @@
+     g_signal_connect (drop_target, "motion", G_CALLBACK (on_item_drag_motion), cell);
+     g_signal_connect (drop_target, "drop", G_CALLBACK (on_item_drop), cell);
+     gtk_widget_add_controller (GTK_WIDGET (cell), GTK_EVENT_CONTROLLER (drop_target));
++}
++
++void
++setup_cell_common (GObject          *listitem,
++                   NautilusViewCell *cell)
++{
++    GtkExpression *expression;
++
++    expression = gtk_property_expression_new (GTK_TYPE_LIST_ITEM, NULL, "item");
++    expression = gtk_property_expression_new (GTK_TYPE_TREE_LIST_ROW, expression, "item");
++    expression = gtk_cclosure_expression_new (NAUTILUS_TYPE_VIEW_ITEM, NULL, 1, &expression,
++                                              G_CALLBACK (file_item_expression), NULL, NULL);
++    gtk_expression_bind (expression, cell, "item", listitem);
++    g_object_bind_property (listitem, "position", cell, "position", G_BINDING_SYNC_CREATE);
++
++    setup_cell_controllers (cell);
++}
++
++void
++setup_cell_common_direct (GObject          *listitem,
++                          NautilusViewCell *cell)
++{
++    GtkExpression *expression;
++
++    /* Grouped grid rows expose NautilusViewItem directly instead of
++     * GtkTreeListRow. The caller supplies the global model position in ::bind. */
++    expression = gtk_property_expression_new (GTK_TYPE_LIST_ITEM, NULL, "item");
++    gtk_expression_bind (expression, cell, "item", listitem);
++
++    setup_cell_controllers (cell);
++}
++
++void
++setup_cell_common_item (NautilusViewCell *cell,
++                        NautilusViewItem *item,
++                        guint             position)
++{
++    /* Non-virtualized grouped-grid cells are regular widgets, not GtkListItem
++     * children. Bind their item and global position explicitly, then install
++     * the same Nautilus click/DnD controllers used by the native views. */
++    nautilus_view_cell_set_item (cell, item);
++    g_object_set (cell, "position", position, NULL);
++    setup_cell_controllers (cell);
+ }
+ 
+ static void
+--- a/src/nautilus-list-view.c
++++ b/src/nautilus-list-view.c
+@@ -54,6 +54,7 @@
+     GHashTable *factory_to_column_map;
+ 
+     GtkSorter *view_model_sorter;
++    gboolean group_by_type;
+ };
+ 
+ G_DEFINE_TYPE (NautilusListView, nautilus_list_view, NAUTILUS_TYPE_LIST_BASE)
+@@ -69,6 +70,91 @@
+ 
+ #define get_view_item(cell) \
+         (NAUTILUS_VIEW_ITEM (gtk_tree_list_row_get_item (GTK_TREE_LIST_ROW (gtk_column_view_cell_get_item (cell)))))
++
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++static GtkWidget *
++file_cell (GtkColumnViewCell *listitem)
++{
++    GtkWidget *child = gtk_column_view_cell_get_child (listitem);
++    return GTK_IS_STACK (child) ? gtk_stack_get_child_by_name (GTK_STACK (child), "file") : child;
++}
++static void
++setup_group_wrapper (GtkSignalListItemFactory *factory, GtkColumnViewCell *listitem, gpointer user_data)
++{
++    NautilusListView *self = user_data;
++    NautilusColumn *column = g_hash_table_lookup (self->factory_to_column_map, factory);
++    g_autofree char *name = NULL;
++    g_object_get (column, "name", &name, NULL);
++    GtkWidget *cell = gtk_column_view_cell_get_child (listitem);
++    GtkWidget *stack = gtk_stack_new ();
++    gtk_stack_set_hhomogeneous (GTK_STACK (stack), FALSE);
++    gtk_stack_set_vhomogeneous (GTK_STACK (stack), FALSE);
++    g_object_ref (cell);
++    gtk_column_view_cell_set_child (listitem, NULL);
++    gtk_stack_add_named (GTK_STACK (stack), cell, "file");
++    g_object_unref (cell);
++    GtkWidget *group;
++    if (g_str_equal (name, "name"))
++    {
++        group = gtk_tree_expander_new ();
++        GtkWidget *label = gtk_label_new (NULL);
++        gtk_label_set_xalign (GTK_LABEL (label), 0.0);
++        gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
++        gtk_widget_add_css_class (label, "heading");
++        gtk_widget_set_margin_top (label, 8);
++        gtk_widget_set_margin_bottom (label, 8);
++        gtk_tree_expander_set_child (GTK_TREE_EXPANDER (group), label);
++        g_object_set_data (G_OBJECT (listitem), "group-expander", group);
++    }
++    else group = gtk_label_new ("");
++    gtk_stack_add_named (GTK_STACK (stack), group, "group");
++    gtk_column_view_cell_set_child (listitem, stack);
++}
++static void
++bind_group_wrapper (GtkSignalListItemFactory *factory, GtkColumnViewCell *listitem, gpointer user_data)
++{
++    g_autoptr (NautilusViewItem) item = get_view_item (listitem);
++    gboolean is_group = nautilus_view_item_is_group (item);
++    GtkWidget *stack = gtk_column_view_cell_get_child (listitem);
++    gtk_stack_set_visible_child_name (GTK_STACK (stack), is_group ? "group" : "file");
++    GtkTreeExpander *expander = g_object_get_data (G_OBJECT (listitem), "group-expander");
++    if (expander != NULL)
++    {
++        gtk_tree_expander_set_list_row (expander, is_group ? gtk_column_view_cell_get_item (listitem) : NULL);
++        if (is_group)
++        {
++            GBinding *binding = g_object_bind_property (item, "group-title", gtk_tree_expander_get_child (expander), "label", G_BINDING_SYNC_CREATE);
++            g_object_set_data_full (G_OBJECT (listitem), "group-title-binding", g_object_ref (binding), g_object_unref);
++        }
++    }
++}
++static void
++unbind_group_wrapper (GtkSignalListItemFactory *factory, GtkColumnViewCell *listitem, gpointer user_data)
++{
++    GBinding *binding = g_object_get_data (G_OBJECT (listitem), "group-title-binding");
++    if (binding != NULL)
++    {
++        g_binding_unbind (binding);
++        g_object_set_data (G_OBJECT (listitem), "group-title-binding", NULL);
++    }
++    GtkTreeExpander *expander = g_object_get_data (G_OBJECT (listitem), "group-expander");
++    if (expander != NULL) gtk_tree_expander_set_list_row (expander, NULL);
++}
++static void
++bind_group_row (GtkSignalListItemFactory *factory, GtkColumnViewRow *row, gpointer user_data)
++{
++    GtkTreeListRow *tree_row = gtk_column_view_row_get_item (row);
++    g_autoptr (NautilusViewItem) item = gtk_tree_list_row_get_item (tree_row);
++    gboolean is_group = nautilus_view_item_is_group (item);
++    gtk_column_view_row_set_selectable (row, !is_group);
++    gtk_column_view_row_set_activatable (row, !is_group);
++    if (is_group)
++    {
++        g_autofree char *title = NULL;
++        g_object_get (item, "group-title", &title, NULL);
++        gtk_column_view_row_set_accessible_label (row, title);
++    }
++}
+ 
+ static const NautilusViewInfo list_view_info =
+ {
+@@ -339,6 +425,14 @@
+ {
+     NautilusListView *self = NAUTILUS_LIST_VIEW (user_data);
+ 
++    NautilusViewModel *model = nautilus_list_base_get_model (NAUTILUS_LIST_BASE (self));
++    g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (model), position);
++    g_autoptr (NautilusViewItem) item = row ? gtk_tree_list_row_get_item (row) : NULL;
++    if (nautilus_view_item_is_group (item))
++    {
++        gtk_tree_list_row_set_expanded (row, !gtk_tree_list_row_get_expanded (row));
++        return;
++    }
+     nautilus_list_base_activate_selection (NAUTILUS_LIST_BASE (self), FALSE);
+ }
+ 
+@@ -369,6 +463,7 @@
+     gtk_widget_set_hexpand (widget, TRUE);
+ 
+     g_signal_connect (row_factory, "setup", G_CALLBACK (setup_row), self);
++    g_signal_connect (row_factory, "bind", G_CALLBACK (bind_group_row), self);
+ 
+     /* We don't use the built-in child activation feature for click because it
+      * doesn't fill all our needs nor does it match our expected behavior.
+@@ -581,8 +676,8 @@
+ 
+     update_columns_settings_from_metadata_and_preferences (self);
+ 
+-    self->expand_as_a_tree = g_settings_get_boolean (nautilus_list_view_preferences,
+-                                                     NAUTILUS_PREFERENCES_LIST_VIEW_USE_TREE);
++    /* Experimental version reserves the tree level for type groups. */
++    self->expand_as_a_tree = FALSE;
+ 
+     self->path_attribute_q = 0;
+     g_clear_object (&self->file_path_base_location);
+@@ -911,10 +1006,11 @@
+     NautilusListView *self = user_data;
+     g_autoptr (NautilusViewItem) item = NULL;
+ 
+-    cell = gtk_column_view_cell_get_child (listitem);
++    cell = file_cell (listitem);
+     item = get_view_item (listitem);
+-
+-    nautilus_view_item_set_item_ui (item, gtk_column_view_cell_get_child (listitem));
++    if (nautilus_view_item_is_group (item)) return;
++
++    nautilus_view_item_set_item_ui (item, file_cell (listitem));
+ 
+     if (self->expand_as_a_tree)
+     {
+@@ -941,9 +1037,9 @@
+     g_autoptr (NautilusViewItem) item = NULL;
+ 
+     item = get_view_item (listitem);
+-    if (item == NULL)
+-    {
+-        /* The row is gone */
++    if (item == NULL || nautilus_view_item_is_group (item))
++    {
++        /* The row is gone or is a non-file header. */
+         return;
+     }
+     g_return_if_fail (NAUTILUS_IS_VIEW_ITEM (item));
+@@ -1054,6 +1150,9 @@
+             g_signal_connect (factory, "setup", G_CALLBACK (setup_label_cell), self);
+         }
+ 
++        g_signal_connect (factory, "setup", G_CALLBACK (setup_group_wrapper), self);
++        g_signal_connect (factory, "bind", G_CALLBACK (bind_group_wrapper), self);
++        g_signal_connect (factory, "unbind", G_CALLBACK (unbind_group_wrapper), self);
+         gtk_column_view_append_column (self->view_ui, view_column);
+         gtk_column_view_column_set_id (view_column, name);
+ 
+@@ -1086,6 +1185,7 @@
+         g_set_object (&self->view_model_sorter, GTK_SORTER (sorter));
+ 
+         nautilus_view_model_set_sorter (model, self->view_model_sorter);
++        nautilus_view_model_set_group_by_type (model, self->group_by_type);
+ 
+         nautilus_view_model_expand_as_a_tree (model, self->expand_as_a_tree);
+ 
+@@ -1104,6 +1204,7 @@
+     GtkEventController *controller;
+     GtkShortcut *shortcut;
+ 
++    self->group_by_type = TRUE;
+     gtk_widget_add_css_class (GTK_WIDGET (self), "nautilus-list-view");
+ 
+     g_signal_connect_object (nautilus_list_view_preferences,
+@@ -1169,6 +1270,7 @@
+         /* We should unset the sorter if it references the view. */
+         if (sorter == self->view_model_sorter)
+         {
++            nautilus_view_model_set_group_by_type (model, FALSE);
+             nautilus_view_model_set_sorter (model, NULL);
+         }
+     }
+@@ -1238,3 +1340,11 @@
+ {
+     return g_object_new (NAUTILUS_TYPE_LIST_VIEW, NULL);
+ }
++
++void
++nautilus_list_view_set_group_by_type (NautilusListView *self, gboolean enabled)
++{
++    self->group_by_type = enabled;
++    NautilusViewModel *model = nautilus_list_base_get_model (NAUTILUS_LIST_BASE (self));
++    if (model != NULL) nautilus_view_model_set_group_by_type (model, enabled);
++}
+--- a/src/nautilus-list-view.h
++++ b/src/nautilus-list-view.h
+@@ -20,4 +20,5 @@
+ 
+ void nautilus_list_view_present_column_editor (NautilusListView *self);
+ 
++void nautilus_list_view_set_group_by_type (NautilusListView *self, gboolean enabled);
+ G_END_DECLS
+--- a/src/nautilus-metadata.c
++++ b/src/nautilus-metadata.c
+@@ -28,6 +28,7 @@
+     NAUTILUS_METADATA_KEY_LIST_VIEW_SORT_REVERSED,
+     NAUTILUS_METADATA_KEY_LIST_VIEW_VISIBLE_COLUMNS,
+     NAUTILUS_METADATA_KEY_LIST_VIEW_COLUMN_ORDER,
++    NAUTILUS_METADATA_KEY_GROUP_COLLAPSED_TYPES,
+     NAUTILUS_METADATA_KEY_CUSTOM_ICON,
+     NAUTILUS_METADATA_KEY_CUSTOM_ICON_NAME,
+     NAUTILUS_METADATA_KEY_EMBLEMS,
+--- a/src/nautilus-metadata.h
++++ b/src/nautilus-metadata.h
+@@ -30,15 +30,19 @@
+ 
+ /* Per-file */
+ 
+-#define NAUTILUS_METADATA_KEY_ICON_VIEW_SORT_BY          	"nautilus-icon-view-sort-by"
+-#define NAUTILUS_METADATA_KEY_ICON_VIEW_SORT_REVERSED    	"nautilus-icon-view-sort-reversed"
++#define NAUTILUS_METADATA_KEY_ICON_VIEW_SORT_BY          	"nautilus-groupes-test-icon-view-sort-by"
++#define NAUTILUS_METADATA_KEY_ICON_VIEW_SORT_REVERSED    	"nautilus-groupes-test-icon-view-sort-reversed"
+ 
+-#define NAUTILUS_METADATA_KEY_LIST_VIEW_SORT_COLUMN      	"nautilus-list-view-sort-column"
+-#define NAUTILUS_METADATA_KEY_LIST_VIEW_SORT_REVERSED    	"nautilus-list-view-sort-reversed"
+-#define NAUTILUS_METADATA_KEY_LIST_VIEW_VISIBLE_COLUMNS    	"nautilus-list-view-visible-columns"
+-#define NAUTILUS_METADATA_KEY_LIST_VIEW_COLUMN_ORDER    	"nautilus-list-view-column-order"
++#define NAUTILUS_METADATA_KEY_LIST_VIEW_SORT_COLUMN      	"nautilus-groupes-test-list-view-sort-column"
++#define NAUTILUS_METADATA_KEY_LIST_VIEW_SORT_REVERSED    	"nautilus-groupes-test-list-view-sort-reversed"
++#define NAUTILUS_METADATA_KEY_LIST_VIEW_VISIBLE_COLUMNS    	"nautilus-groupes-test-list-view-visible-columns"
++#define NAUTILUS_METADATA_KEY_LIST_VIEW_COLUMN_ORDER    	"nautilus-groupes-test-list-view-column-order"
++
++#define NAUTILUS_METADATA_KEY_GROUP_COLLAPSED_TYPES         "nautilus-groupes-test-collapsed-types"
+ 
+ #define NAUTILUS_METADATA_KEY_CUSTOM_ICON                	"custom-icon"
++#define NAUTILUS_METADATA_KEY_GROUP_COLLAPSED_TYPES         "nautilus-groupes-test-collapsed-types"
++
+ #define NAUTILUS_METADATA_KEY_CUSTOM_ICON_NAME                	"custom-icon-name"
+ #define NAUTILUS_METADATA_KEY_EMBLEMS				"emblems"
+ 
+--- a/src/nautilus-view-item.c
++++ b/src/nautilus-view-item.c
+@@ -16,6 +16,9 @@
+     gboolean loading;
+     NautilusFile *file;
+     GtkWidget *item_ui;
++    char *group_key;
++    char *group_title;
++    GListStore *group_children;
+ };
+ 
+ G_DEFINE_TYPE (NautilusViewItem, nautilus_view_item, G_TYPE_OBJECT)
+@@ -24,6 +27,7 @@
+ {
+     PROP_0,
+     PROP_FILE,
++    PROP_GROUP_TITLE,
+     PROP_IS_CUT,
+     PROP_DRAG_ACCEPT,
+     PROP_LOADING,
+@@ -56,6 +60,9 @@
+     NautilusViewItem *self = NAUTILUS_VIEW_ITEM (object);
+ 
+     g_clear_object (&self->file);
++    g_clear_object (&self->group_children);
++    g_free (self->group_key);
++    g_free (self->group_title);
+ 
+     G_OBJECT_CLASS (nautilus_view_item_parent_class)->finalize (object);
+ }
+@@ -70,6 +77,9 @@
+ 
+     switch (prop_id)
+     {
++        case PROP_GROUP_TITLE:
++            g_value_set_string (value, self->group_title);
++            break;
+         case PROP_FILE:
+         {
+             g_value_set_object (value, self->file);
+@@ -172,6 +182,7 @@
+     properties[PROP_LOADING] = g_param_spec_boolean ("loading", NULL, NULL,
+                                                      FALSE,
+                                                      G_PARAM_READWRITE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++    properties[PROP_GROUP_TITLE] = g_param_spec_string ("group-title", NULL, NULL, NULL, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
+     g_object_class_install_properties (object_class, N_PROPS, properties);
+ 
+     signals[FILE_CHANGED] = g_signal_new ("file-changed",
+@@ -262,3 +273,36 @@
+ 
+     g_signal_emit (self, signals[FILE_CHANGED], 0);
+ }
++
++/* Non-file presentation headers. Never enter the filesystem item map. */
++NautilusViewItem *
++nautilus_view_item_new_group (const char *key)
++{
++    NautilusViewItem *self = nautilus_view_item_new (NULL);
++    self->group_key = g_strdup (key);
++    self->group_children = g_list_store_new (NAUTILUS_TYPE_VIEW_ITEM);
++    return self;
++}
++gboolean
++nautilus_view_item_is_group (NautilusViewItem *self)
++{
++    return self != NULL && self->group_key != NULL;
++}
++const char *
++nautilus_view_item_get_group_key (NautilusViewItem *self)
++{
++    return self->group_key;
++}
++GListStore *
++nautilus_view_item_get_group_children (NautilusViewItem *self)
++{
++    return self->group_children;
++}
++void
++nautilus_view_item_set_group_title (NautilusViewItem *self, const char *title)
++{
++    if (g_strcmp0 (self->group_title, title) == 0) return;
++    g_free (self->group_title);
++    self->group_title = g_strdup (title);
++    g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_GROUP_TITLE]);
++}
+--- a/src/nautilus-view-item.h
++++ b/src/nautilus-view-item.h
+@@ -35,4 +35,9 @@
+ GtkWidget *        nautilus_view_item_get_item_ui   (NautilusViewItem *self);
+ void               nautilus_view_item_file_changed  (NautilusViewItem *self);
+ 
++NautilusViewItem *nautilus_view_item_new_group (const char *key);
++gboolean nautilus_view_item_is_group (NautilusViewItem *self);
++const char *nautilus_view_item_get_group_key (NautilusViewItem *self);
++GListStore *nautilus_view_item_get_group_children (NautilusViewItem *self);
++void nautilus_view_item_set_group_title (NautilusViewItem *self, const char *title);
+ G_END_DECLS
+--- a/src/nautilus-view-model.c
++++ b/src/nautilus-view-model.c
+@@ -39,6 +39,12 @@
+     GtkTreeListModel *tree_model;
+     GtkSortListModel *sort_model;
+     GtkSelectionModel *selection_model;
++    GListStore *group_roots;
++    GtkTreeListModel *group_tree;
++    GHashTable *groups;
++    GHashTable *collapsed_groups;
++    gboolean group_by_type;
++    gboolean rebuilding_groups;
+ 
+     gboolean single_selection;
+     gboolean expand_as_a_tree;
+@@ -71,12 +77,12 @@
+ {
+     NautilusViewModel *self = NAUTILUS_VIEW_MODEL (list);
+ 
+-    if (self->tree_model == NULL)
++    if (self->selection_model == NULL)
+     {
+         return 0;
+     }
+ 
+-    return g_list_model_get_n_items (G_LIST_MODEL (self->tree_model));
++    return g_list_model_get_n_items (G_LIST_MODEL (self->selection_model));
+ }
+ 
+ static gpointer
+@@ -85,12 +91,12 @@
+ {
+     NautilusViewModel *self = NAUTILUS_VIEW_MODEL (list);
+ 
+-    if (self->sort_model == NULL)
++    if (self->selection_model == NULL)
+     {
+         return NULL;
+     }
+ 
+-    return g_list_model_get_item (G_LIST_MODEL (self->sort_model), position);
++    return g_list_model_get_item (G_LIST_MODEL (self->selection_model), position);
+ }
+ 
+ static void
+@@ -109,7 +115,14 @@
+ {
+     NautilusViewModel *self = NAUTILUS_VIEW_MODEL (model);
+ 
+-    gtk_section_model_get_section (GTK_SECTION_MODEL (self->sort_model), position, out_start, out_end);
++    if (self->group_by_type)
++    {
++        guint n = g_list_model_get_n_items (G_LIST_MODEL (self));
++        *out_start = position < n ? 0 : n;
++        *out_end = position < n ? n : G_MAXUINT;
++    }
++    else
++        gtk_section_model_get_section (GTK_SECTION_MODEL (self->sort_model), position, out_start, out_end);
+ }
+ 
+ static void
+@@ -144,6 +157,9 @@
+ {
+     NautilusViewModel *self = NAUTILUS_VIEW_MODEL (model);
+ 
++    g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (self), position);
++    g_autoptr (NautilusViewItem) item = row ? gtk_tree_list_row_get_item (row) : NULL;
++    if (item == NULL || nautilus_view_item_is_group (item)) return FALSE;
+     return gtk_selection_model_select_item (self->selection_model, position, unselect_rest);
+ }
+ 
+@@ -154,7 +170,20 @@
+ {
+     NautilusViewModel *self = NAUTILUS_VIEW_MODEL (model);
+ 
+-    return gtk_selection_model_set_selection (self->selection_model, selected, mask);
++    g_autoptr (GtkBitset) safe = gtk_bitset_copy (selected);
++    if (self->group_by_type)
++    {
++        GtkBitsetIter iter;
++        guint position;
++        for (gtk_bitset_iter_init_first (&iter, selected, &position);
++             gtk_bitset_iter_is_valid (&iter); gtk_bitset_iter_next (&iter, &position))
++        {
++            g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (self), position);
++            g_autoptr (NautilusViewItem) item = row ? gtk_tree_list_row_get_item (row) : NULL;
++            if (item == NULL || nautilus_view_item_is_group (item)) gtk_bitset_remove (safe, position);
++        }
++    }
++    return gtk_selection_model_set_selection (self->selection_model, safe, mask);
+ }
+ 
+ 
+@@ -206,6 +235,10 @@
+ 
+ static GParamSpec *properties[N_PROPS] = { NULL, };
+ 
++static void rebuild_type_groups (NautilusViewModel *self);
++static void on_source_items_changed (GListModel *source, guint position, guint removed, guint added, NautilusViewModel *self);
++static void on_source_sections_changed (GtkSectionModel *source, guint position, guint n_items, NautilusViewModel *self);
++
+ static void
+ dispose (GObject *object)
+ {
+@@ -216,6 +249,7 @@
+         g_signal_handlers_disconnect_by_func (self->selection_model,
+                                               gtk_selection_model_selection_changed,
+                                               self);
++        g_signal_handlers_disconnect_by_func (self->selection_model, g_list_model_items_changed, self);
+         g_object_unref (self->selection_model);
+         self->selection_model = NULL;
+     }
+@@ -228,10 +262,16 @@
+         g_signal_handlers_disconnect_by_func (self->sort_model,
+                                               gtk_section_model_sections_changed,
+                                               self);
++        g_signal_handlers_disconnect_by_func (self->sort_model, on_source_items_changed, self);
++        g_signal_handlers_disconnect_by_func (self->sort_model, on_source_sections_changed, self);
+         g_object_unref (self->sort_model);
+         self->sort_model = NULL;
+     }
+ 
++    g_clear_object (&self->group_tree);
++    g_clear_object (&self->group_roots);
++    g_clear_pointer (&self->groups, g_hash_table_unref);
++    g_clear_pointer (&self->collapsed_groups, g_hash_table_unref);
+     g_clear_object (&self->tree_model);
+     g_clear_object (&self->root_filter_model);
+ 
+@@ -383,10 +423,9 @@
+     self->map_files_to_model = g_hash_table_new (NULL, NULL);
+     self->directory_reverse_map = g_hash_table_new_full (NULL, NULL, NULL, g_object_unref);
+ 
+-    g_signal_connect_swapped (self->sort_model, "items-changed",
+-                              G_CALLBACK (g_list_model_items_changed), self);
+-    g_signal_connect_swapped (self->sort_model, "sections-changed",
+-                              G_CALLBACK (gtk_section_model_sections_changed), self);
++    g_signal_connect (self->sort_model, "items-changed", G_CALLBACK (on_source_items_changed), self);
++    g_signal_connect_swapped (self->selection_model, "items-changed", G_CALLBACK (g_list_model_items_changed), self);
++    g_signal_connect (self->sort_model, "sections-changed", G_CALLBACK (on_source_sections_changed), self);
+     g_signal_connect_swapped (self->selection_model, "selection-changed",
+                               G_CALLBACK (gtk_selection_model_selection_changed), self);
+ }
+@@ -421,6 +460,7 @@
+ static void
+ nautilus_view_model_init (NautilusViewModel *self)
+ {
++    self->collapsed_groups = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+ }
+ 
+ static gint
+@@ -520,6 +560,7 @@
+     {
+         gtk_sorter_changed (sorter, GTK_SORTER_CHANGE_DIFFERENT);
+     }
++    if (self->group_by_type) rebuild_type_groups (self);
+ }
+ 
+ GList *
+@@ -758,3 +799,430 @@
+         }
+     }
+ }
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++static GListModel *
++create_group_children (gpointer item, gpointer data)
++{
++    GListStore *children = nautilus_view_item_get_group_children (item);
++    return children ? G_LIST_MODEL (g_object_ref (children)) : NULL;
++}
++
++static char *
++file_group_key (NautilusFile *file)
++{
++    if (nautilus_file_is_directory (file)) return g_strdup ("0:directories");
++
++    /* Borrowed from NautilusFile: always duplicate before returning ownership. */
++    const char *mime = nautilus_file_get_mime_type (file);
++    return mime != NULL ? g_strdup (mime) : g_strdup ("application/octet-stream");
++}
++
++/* Minimal contiguous replacement preserves unaffected tree rows. */
++static void
++update_store (GListStore *store, GPtrArray *items)
++{
++    guint old_n = g_list_model_get_n_items (G_LIST_MODEL (store));
++    guint start = 0, tail = 0;
++
++    while (start < MIN (old_n, items->len))
++    {
++        g_autoptr (GObject) old = g_list_model_get_item (G_LIST_MODEL (store), start);
++        if (old != items->pdata[start]) break;
++        start++;
++    }
++
++    while (tail < MIN (old_n, items->len) - start)
++    {
++        g_autoptr (GObject) old = g_list_model_get_item (G_LIST_MODEL (store), old_n - tail - 1);
++        if (old != items->pdata[items->len - tail - 1]) break;
++        tail++;
++    }
++
++    if (old_n != items->len || start + tail != old_n)
++        g_list_store_splice (store, start, old_n - start - tail,
++                            items->len > start + tail ? items->pdata + start : NULL,
++                            items->len - start - tail);
++}
++
++static GHashTable *
++remember_selected_items (NautilusViewModel *self)
++{
++    GHashTable *selected = g_hash_table_new_full (g_direct_hash, g_direct_equal, g_object_unref, NULL);
++    g_autoptr (GtkBitset) bits = gtk_selection_model_get_selection (self->selection_model);
++    GtkBitsetIter iter;
++    guint pos;
++
++    for (gtk_bitset_iter_init_first (&iter, bits, &pos);
++         gtk_bitset_iter_is_valid (&iter); gtk_bitset_iter_next (&iter, &pos))
++    {
++        g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (self), pos);
++        if (row != NULL) g_hash_table_add (selected, gtk_tree_list_row_get_item (row));
++    }
++
++    return selected;
++}
++
++static void
++restore_selected_items (NautilusViewModel *self, GHashTable *selected)
++{
++    guint n = g_list_model_get_n_items (G_LIST_MODEL (self));
++    g_autoptr (GtkBitset) bits = gtk_bitset_new_empty ();
++    g_autoptr (GtkBitset) mask = gtk_bitset_new_range (0, n);
++
++    for (guint i = 0; i < n; i++)
++    {
++        g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (self), i);
++        g_autoptr (NautilusViewItem) item = gtk_tree_list_row_get_item (row);
++        if (!nautilus_view_item_is_group (item) && g_hash_table_contains (selected, item)) gtk_bitset_add (bits, i);
++    }
++
++    gtk_selection_model_set_selection (GTK_SELECTION_MODEL (self), bits, mask);
++}
++
++static void
++on_group_expanded_changed (GtkTreeListRow  *row,
++                           GParamSpec      *pspec,
++                           NautilusViewModel *self)
++{
++    if (self->rebuilding_groups) return;
++
++    g_autoptr (NautilusViewItem) item = gtk_tree_list_row_get_item (row);
++    if (item == NULL || !nautilus_view_item_is_group (item)) return;
++
++    const char *key = nautilus_view_item_get_group_key (item);
++    gboolean changed;
++
++    if (gtk_tree_list_row_get_expanded (row))
++        changed = g_hash_table_remove (self->collapsed_groups, key);
++    else
++        changed = g_hash_table_add (self->collapsed_groups, g_strdup (key));
++
++    (void) changed;
++}
++
++/*
++ * The notify::expanded signal is useful for normal interaction, but source-model
++ * updates may cause GtkTreeListModel to update rows while the grouping model is
++ * being rebuilt.  Read the actual root-row state before every rebuild so the
++ * hash table cannot lag behind GTK.
++ */
++static void
++sync_collapsed_groups_from_rows (NautilusViewModel *self)
++{
++    if (!self->group_by_type || self->group_tree == NULL || self->group_roots == NULL)
++        return;
++
++    guint n = g_list_model_get_n_items (G_LIST_MODEL (self->group_roots));
++    for (guint i = 0; i < n; i++)
++    {
++        g_autoptr (GtkTreeListRow) row = gtk_tree_list_model_get_child_row (self->group_tree, i);
++        g_autoptr (NautilusViewItem) item = row ? gtk_tree_list_row_get_item (row) : NULL;
++
++        if (item == NULL || !nautilus_view_item_is_group (item))
++            continue;
++
++        const char *key = nautilus_view_item_get_group_key (item);
++        if (gtk_tree_list_row_get_expanded (row))
++            g_hash_table_remove (self->collapsed_groups, key);
++        else if (!g_hash_table_contains (self->collapsed_groups, key))
++            g_hash_table_add (self->collapsed_groups, g_strdup (key));
++    }
++}
++
++static void
++apply_collapsed_groups_to_rows (NautilusViewModel *self)
++{
++    if (self->group_tree == NULL || self->group_roots == NULL)
++        return;
++
++    guint n = g_list_model_get_n_items (G_LIST_MODEL (self->group_roots));
++    for (guint i = 0; i < n; i++)
++    {
++        g_autoptr (GtkTreeListRow) row = gtk_tree_list_model_get_child_row (self->group_tree, i);
++        g_autoptr (NautilusViewItem) item = row ? gtk_tree_list_row_get_item (row) : NULL;
++
++        if (item == NULL || !nautilus_view_item_is_group (item))
++            continue;
++
++        const char *key = nautilus_view_item_get_group_key (item);
++        g_signal_handlers_disconnect_by_func (row, on_group_expanded_changed, self);
++        gtk_tree_list_row_set_expanded (row, !g_hash_table_contains (self->collapsed_groups, key));
++        g_signal_connect (row, "notify::expanded", G_CALLBACK (on_group_expanded_changed), self);
++    }
++}
++
++static void
++rebuild_type_groups (NautilusViewModel *self)
++{
++    if (!self->group_by_type || self->rebuilding_groups) return;
++
++    sync_collapsed_groups_from_rows (self);
++    self->rebuilding_groups = TRUE;
++    g_autoptr (GHashTable) selected = remember_selected_items (self);
++    g_autoptr (GHashTable) buckets = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) g_ptr_array_unref);
++    g_autoptr (GPtrArray) roots = g_ptr_array_new ();
++
++    guint n = g_list_model_get_n_items (G_LIST_MODEL (self->sort_model));
++    for (guint i = 0; i < n; i++)
++    {
++        g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (self->sort_model), i);
++        NautilusViewItem *item = gtk_tree_list_row_get_item (row);
++        g_autofree char *key = file_group_key (nautilus_view_item_get_file (item));
++        GPtrArray *bucket = g_hash_table_lookup (buckets, key);
++
++        if (bucket == NULL)
++        {
++            bucket = g_ptr_array_new_with_free_func (g_object_unref);
++            g_hash_table_insert (buckets, g_strdup (key), bucket);
++        }
++        g_ptr_array_add (bucket, item);
++    }
++
++    g_autoptr (GList) keys = g_hash_table_get_keys (buckets);
++    keys = g_list_sort (keys, (GCompareFunc) g_strcmp0);
++
++    for (GList *l = keys; l != NULL; l = l->next)
++    {
++        const char *key = l->data;
++        GPtrArray *bucket = g_hash_table_lookup (buckets, key);
++        NautilusViewItem *group = g_hash_table_lookup (self->groups, key);
++
++        if (group == NULL)
++        {
++            group = nautilus_view_item_new_group (key);
++            g_hash_table_insert (self->groups, g_strdup (key), group);
++        }
++
++        g_autofree char *description = g_str_equal (key, "0:directories") ? g_strdup ("Dossiers") : g_content_type_get_description (key);
++        g_autofree char *title = g_strdup_printf ("%s (%u)", description ? description : key, bucket->len);
++        nautilus_view_item_set_group_title (group, title);
++        update_store (nautilus_view_item_get_group_children (group), bucket);
++        g_ptr_array_add (roots, group);
++    }
++
++    update_store (self->group_roots, roots);
++
++    apply_collapsed_groups_to_rows (self);
++
++    GHashTableIter iter;
++    gpointer key;
++    g_hash_table_iter_init (&iter, self->groups);
++    while (g_hash_table_iter_next (&iter, &key, NULL))
++        if (!g_hash_table_contains (buckets, key)) g_hash_table_iter_remove (&iter);
++
++    restore_selected_items (self, selected);
++    self->rebuilding_groups = FALSE;
++}
++
++static void
++on_source_items_changed (GListModel *source, guint position, guint removed, guint added, NautilusViewModel *self)
++{
++    if (self->group_by_type) rebuild_type_groups (self);
++}
++
++static void
++on_source_sections_changed (GtkSectionModel *source, guint position, guint n_items, NautilusViewModel *self)
++{
++    /* Grouped presentation positions differ from source positions. */
++    if (!self->group_by_type) gtk_section_model_sections_changed (GTK_SECTION_MODEL (self), position, n_items);
++}
++
++gboolean
++nautilus_view_model_get_group_by_type (NautilusViewModel *self)
++{
++    return self->group_by_type;
++}
++
++void
++nautilus_view_model_set_group_by_type (NautilusViewModel *self, gboolean enabled)
++{
++    if (self->group_by_type == enabled) return;
++
++    if (self->group_by_type && !enabled)
++        sync_collapsed_groups_from_rows (self);
++
++    g_autoptr (GHashTable) selected = remember_selected_items (self);
++    if (enabled)
++    {
++        nautilus_view_model_expand_as_a_tree (self, FALSE);
++        self->group_roots = g_list_store_new (NAUTILUS_TYPE_VIEW_ITEM);
++        self->groups = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_object_unref);
++        self->group_tree = gtk_tree_list_model_new (G_LIST_MODEL (g_object_ref (self->group_roots)), FALSE, FALSE,
++                                                    create_group_children, NULL, NULL);
++    }
++
++    self->group_by_type = enabled;
++    GListModel *display = enabled ? G_LIST_MODEL (self->group_tree) : G_LIST_MODEL (self->sort_model);
++    if (self->single_selection) gtk_single_selection_set_model (GTK_SINGLE_SELECTION (self->selection_model), display);
++    else gtk_multi_selection_set_model (GTK_MULTI_SELECTION (self->selection_model), display);
++
++    if (enabled)
++        rebuild_type_groups (self);
++    else
++    {
++        g_clear_object (&self->group_tree);
++        g_clear_object (&self->group_roots);
++        g_clear_pointer (&self->groups, g_hash_table_unref);
++    }
++
++    restore_selected_items (self, selected);
++}
++
++void
++nautilus_view_model_set_collapsed_groups (NautilusViewModel *self,
++                                          const char * const *keys)
++{
++    g_hash_table_remove_all (self->collapsed_groups);
++    if (keys != NULL)
++    {
++        for (guint i = 0; keys[i] != NULL; i++)
++            g_hash_table_add (self->collapsed_groups, g_strdup (keys[i]));
++    }
++
++    if (self->group_by_type)
++        apply_collapsed_groups_to_rows (self);
++}
++
++static gint
++compare_strv_elements (gconstpointer a,
++                       gconstpointer b,
++                       gpointer      user_data)
++{
++    const char * const *sa = a;
++    const char * const *sb = b;
++    return g_strcmp0 (*sa, *sb);
++}
++
++char **
++nautilus_view_model_dup_collapsed_groups (NautilusViewModel *self)
++{
++    sync_collapsed_groups_from_rows (self);
++
++    guint len = g_hash_table_size (self->collapsed_groups);
++    char **result = g_new0 (char *, len + 1);
++    GHashTableIter iter;
++    gpointer key;
++    guint i = 0;
++
++    g_hash_table_iter_init (&iter, self->collapsed_groups);
++    while (g_hash_table_iter_next (&iter, &key, NULL))
++        result[i++] = g_strdup (key);
++
++    g_sort_array (result, len, sizeof (char *), compare_strv_elements, NULL);
++    return result;
++}
++
++
++GListModel *
++nautilus_view_model_dup_group_roots_model (NautilusViewModel *self)
++{
++    g_return_val_if_fail (NAUTILUS_IS_VIEW_MODEL (self), NULL);
++
++    return self->group_roots != NULL ? G_LIST_MODEL (g_object_ref (self->group_roots)) : NULL;
++}
++
++gboolean
++nautilus_view_model_get_group_collapsed (NautilusViewModel *self,
++                                         const char        *key)
++{
++    g_return_val_if_fail (NAUTILUS_IS_VIEW_MODEL (self), FALSE);
++    g_return_val_if_fail (key != NULL, FALSE);
++
++    return g_hash_table_contains (self->collapsed_groups, key);
++}
++
++void
++nautilus_view_model_set_group_collapsed (NautilusViewModel *self,
++                                         const char        *key,
++                                         gboolean           collapsed)
++{
++    g_return_if_fail (NAUTILUS_IS_VIEW_MODEL (self));
++    g_return_if_fail (key != NULL);
++
++    if (collapsed)
++    {
++        if (!g_hash_table_contains (self->collapsed_groups, key))
++            g_hash_table_add (self->collapsed_groups, g_strdup (key));
++    }
++    else
++    {
++        g_hash_table_remove (self->collapsed_groups, key);
++    }
++
++    if (self->group_tree == NULL || self->group_roots == NULL)
++        return;
++
++    guint n = g_list_model_get_n_items (G_LIST_MODEL (self->group_roots));
++    for (guint i = 0; i < n; i++)
++    {
++        g_autoptr (NautilusViewItem) group = g_list_model_get_item (G_LIST_MODEL (self->group_roots), i);
++        if (group == NULL || g_strcmp0 (nautilus_view_item_get_group_key (group), key) != 0)
++            continue;
++
++        g_autoptr (GtkTreeListRow) row = gtk_tree_list_model_get_child_row (self->group_tree, i);
++        if (row != NULL)
++        {
++            g_signal_handlers_disconnect_by_func (row, on_group_expanded_changed, self);
++            gtk_tree_list_row_set_expanded (row, !collapsed);
++            g_signal_connect (row, "notify::expanded", G_CALLBACK (on_group_expanded_changed), self);
++        }
++        break;
++    }
++}
++
++guint
++nautilus_view_model_get_position_for_item (NautilusViewModel *self,
++                                           NautilusViewItem  *item)
++{
++    g_return_val_if_fail (NAUTILUS_IS_VIEW_MODEL (self), GTK_INVALID_LIST_POSITION);
++    g_return_val_if_fail (NAUTILUS_IS_VIEW_ITEM (item), GTK_INVALID_LIST_POSITION);
++
++    guint n = g_list_model_get_n_items (G_LIST_MODEL (self));
++    for (guint i = 0; i < n; i++)
++    {
++        g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (self), i);
++        g_autoptr (NautilusViewItem) candidate = row ? gtk_tree_list_row_get_item (row) : NULL;
++        if (candidate == item)
++            return i;
++    }
++
++    return GTK_INVALID_LIST_POSITION;
++}
++
++gboolean
++nautilus_view_model_find_group_item (NautilusViewModel *self,
++                                     NautilusViewItem  *item,
++                                     guint             *out_group_position,
++                                     guint             *out_child_position)
++{
++    g_return_val_if_fail (NAUTILUS_IS_VIEW_MODEL (self), FALSE);
++    g_return_val_if_fail (NAUTILUS_IS_VIEW_ITEM (item), FALSE);
++
++    if (self->group_roots == NULL)
++        return FALSE;
++
++    guint group_n = g_list_model_get_n_items (G_LIST_MODEL (self->group_roots));
++    for (guint group_pos = 0; group_pos < group_n; group_pos++)
++    {
++        g_autoptr (NautilusViewItem) group = g_list_model_get_item (G_LIST_MODEL (self->group_roots), group_pos);
++        GListStore *children = group ? nautilus_view_item_get_group_children (group) : NULL;
++        if (children == NULL)
++            continue;
++
++        guint child_n = g_list_model_get_n_items (G_LIST_MODEL (children));
++        for (guint child_pos = 0; child_pos < child_n; child_pos++)
++        {
++            g_autoptr (NautilusViewItem) candidate = g_list_model_get_item (G_LIST_MODEL (children), child_pos);
++            if (candidate == item)
++            {
++                if (out_group_position != NULL)
++                    *out_group_position = group_pos;
++                if (out_child_position != NULL)
++                    *out_child_position = child_pos;
++                return TRUE;
++            }
++        }
++    }
++
++    return FALSE;
++}
+--- a/src/nautilus-view-model.h
++++ b/src/nautilus-view-model.h
+@@ -45,4 +45,20 @@
+ void nautilus_view_model_set_cut_files (NautilusViewModel *self,
+                                         GList             *cut_files);
+ 
++void nautilus_view_model_set_group_by_type (NautilusViewModel *self, gboolean enabled);
++gboolean nautilus_view_model_get_group_by_type (NautilusViewModel *self);
++void nautilus_view_model_set_collapsed_groups (NautilusViewModel *self, const char * const *keys);
++char **nautilus_view_model_dup_collapsed_groups (NautilusViewModel *self);
++GListModel *nautilus_view_model_dup_group_roots_model (NautilusViewModel *self);
++gboolean nautilus_view_model_get_group_collapsed (NautilusViewModel *self,
++                                                  const char        *key);
++void nautilus_view_model_set_group_collapsed (NautilusViewModel *self,
++                                              const char        *key,
++                                              gboolean           collapsed);
++guint nautilus_view_model_get_position_for_item (NautilusViewModel *self,
++                                                 NautilusViewItem  *item);
++gboolean nautilus_view_model_find_group_item (NautilusViewModel *self,
++                                              NautilusViewItem  *item,
++                                              guint             *out_group_position,
++                                              guint             *out_child_position);
+ G_END_DECLS
+--- a/src/resources/menu/nautilus-toolbar-view-menu.ui
++++ b/src/resources/menu/nautilus-toolbar-view-menu.ui
+@@ -2,6 +2,11 @@
+ <interface>
+   <requires lib="gtk" version="4.0"/>
+   <menu id="sort_section">
++    <item>
++      <attribute name="action">view.group-by-type</attribute>
++      <attribute name="label">Regrouper par type</attribute>
++      <attribute name="hidden-when">action-disabled</attribute>
++    </item>
+     <item>
+       <attribute name="action">view.sort</attribute>
+       <attribute name="target" type="(sb)">('name',false)</attribute>
+--- a/src/resources/style.css
++++ b/src/resources/style.css
+@@ -389,3 +389,21 @@
+ .toolbar.no-bottom-padding {
+   padding-bottom: 0px;
+ }
++
++/* Grouped grid: each group uses GtkFlowBox, a non-scrollable height-for-width
++ * layout. This avoids the oversized natural heights produced by nesting
++ * GtkGridView (GtkScrollable) widgets inside the outer scrolling view. */
++.nautilus-grid-view .grouped-grid flowbox.group-flow {
++  padding: 4px 18px 8px;
++  background: none;
++}
++
++.nautilus-grid-view .grouped-grid flowbox.group-flow > flowboxchild {
++  padding: 0;
++  border-radius: 12px;
++}
++
++.nautilus-grid-view .grouped-grid .group-block {
++  margin: 0;
++  padding: 0;
++}

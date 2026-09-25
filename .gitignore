@@ -1,0 +1,28 @@
+# Reconstructed / upstream source trees
+src-work/
+vendor/
+validation/
+
+# Build artefacts
+build/
+_build/
+*.o
+*.so
+*.a
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs / diagnostics
+*.log
+core
+core.*
+
+# Release archives
+*.zip
+*.tar.gz
+
+# Editors / OS
+*~
+.DS_Store

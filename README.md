@@ -1,5 +1,7 @@
 # Nautilus Collapsible Groups
 
+![Status](https://img.shields.io/badge/status-experimental%20%2F%20proof%20of%20concept-orange)
+
 Experimental prototype for **Nautilus 50.3** adding collapsible file-type grouping to both list and grid views.
 
 > **Status:** Proof of concept / experimental  
